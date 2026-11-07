@@ -6,17 +6,32 @@ Run:  python3 reconcile.py
 """
 import json
 
-total = 0.0
-count = 0
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
 
-with open("payments.jsonl") as f:
+base = Path(__file__).resolve().parent
+latest = {}
+
+with (base / "payments.jsonl").open() as f:
     for line in f:
-        event = json.loads(line)
-        if event["status"] == "success":
-            total += float(event["amount"])
-            count += 1
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or not event.get("txn_id"):
+            continue
+        txn_id = event["txn_id"]
+        timestamp = datetime.fromisoformat(event["ts"].replace("Z", "+00:00"))
+        if txn_id not in latest or timestamp > latest[txn_id][0]:
+            latest[txn_id] = (timestamp, event)
 
-with open("expected.txt") as f:
+successful = [event for _, event in latest.values() if event["status"] == "success"]
+count = len(successful)
+total = sum((Decimal(str(event["amount"]).replace(",", ""))
+             for event in successful), Decimal("0"))
+
+with (base / "expected.txt").open() as f:
     expected = int(f.read().strip())
 
 if count != expected:
